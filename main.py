@@ -67,43 +67,6 @@ def run_powershell(script):
         return None
 
 
-def get_health(cpu, ram, disk, gpus):
-    warnings = []
-
-    if cpu >= CPU_WARNING:
-        warnings.append(
-            f"WARNING: CPU {cpu:.1f}%"
-        )
-
-    if ram >= RAM_WARNING:
-        warnings.append(
-            f"WARNING: RAM {ram:.1f}%"
-        )
-
-    if disk >= DISK_CRITICAL:
-        warnings.append(
-            f"CRITICAL: DISK {disk:.1f}%"
-        )
-
-    for gpu in gpus:
-        load = gpu.get("load")
-
-        if (
-            load is not None
-            and load >= GPU_WARNING
-        ):
-            warnings.append(
-                f"WARNING: GPU "
-                f"{gpu['name']} "
-                f"{load:.1f}%"
-            )
-
-    if warnings:
-        return warnings
-
-    return ["SYSTEM HEALTH: OK"]
-
-
 def get_speeds():
     global previous_net
     global previous_disk
@@ -175,10 +138,7 @@ def get_windows_gpu_list():
             data = [data]
 
         for item in data:
-            name = item.get("Name")
-
-            if not name:
-                name = "Unknown GPU"
+            name = item.get("Name") or "Unknown GPU"
 
             vram = None
 
@@ -293,18 +253,6 @@ def get_gpu_load_groups():
         if not values:
             continue
 
-        #
-        # Windows создаёт отдельные
-        # счётчики для 3D, Copy,
-        # Video Decode и других
-        # GPU engines.
-        #
-        # AMS31 берёт реальную загрузку
-        # самого занятого engine.
-        #
-        # Значения не складываются
-        # и не распределяются.
-        #
         load = max(values)
 
         load = max(
@@ -328,14 +276,6 @@ def get_gpu_info():
 
     load_groups = get_gpu_load_groups()
 
-    #
-    # Если Windows обнаружила только
-    # одну GPU, все GPU Engine counters
-    # относятся именно к ней.
-    #
-    # Поэтому значение можно связать
-    # без угадывания.
-    #
     if len(gpus) == 1:
         if load_groups:
             loads = [
@@ -348,25 +288,65 @@ def get_gpu_info():
 
         return gpus
 
-    #
-    # Несколько GPU.
-    #
-    # Performance Counters Windows
-    # используют внутренний LUID,
-    # а Win32_VideoController возвращает
-    # другое имя устройства.
-    #
-    # Без дополнительного API или
-    # драйверной библиотеки нельзя
-    # гарантированно определить,
-    # какой LUID принадлежит какой GPU.
-    #
-    # Поэтому AMS31 ничего не угадывает.
-    #
     for gpu in gpus:
         gpu["load"] = None
 
     return gpus
+
+
+def get_health(cpu, ram, disk, gpus):
+    messages = []
+
+    if cpu >= CPU_WARNING:
+        messages.append(
+            f"WARNING | CPU | Загрузка: {cpu:.1f}%"
+        )
+        messages.append(
+            "Рекомендация: закройте тяжёлые программы "
+            "и проверьте фоновые процессы."
+        )
+
+    if ram >= RAM_WARNING:
+        messages.append(
+            f"WARNING | RAM | Использовано: {ram:.1f}%"
+        )
+        messages.append(
+            "Рекомендация: закройте ненужные приложения "
+            "и вкладки браузера."
+        )
+
+    if disk >= DISK_CRITICAL:
+        messages.append(
+            f"CRITICAL | DISK C: | Заполнено: {disk:.1f}%"
+        )
+        messages.append(
+            "Рекомендация: освободите место на диске "
+            "или перенесите ненужные файлы."
+        )
+
+    for gpu in gpus:
+        load = gpu.get("load")
+
+        if (
+            load is not None
+            and load >= GPU_WARNING
+        ):
+            messages.append(
+                f"WARNING | GPU | {gpu['name']} | "
+                f"Загрузка: {load:.1f}%"
+            )
+
+            messages.append(
+                "Рекомендация: проверьте запущенные игры, "
+                "графические программы и фоновые процессы."
+            )
+
+    if not messages:
+        return [
+            "СОСТОЯНИЕ СИСТЕМЫ: НОРМА"
+        ]
+
+    return messages
 
 
 def safe_cpu_percent():
@@ -412,9 +392,9 @@ def show_status():
         "=" * 70,
         "                    AMS31 MONITORING SYSTEM",
         "=" * 70,
-        f"Time:       {now.strftime('%H:%M:%S')}",
-        f"Date:       {now.strftime('%d.%m.%Y')}",
-        "System:     ONLINE",
+        f"Время:      {now.strftime('%H:%M:%S')}",
+        f"Дата:       {now.strftime('%d.%m.%Y')}",
+        "Система:    ONLINE",
         "-" * 70,
         f"CPU:        {cpu:6.1f}%"
     ]
@@ -430,24 +410,24 @@ def show_status():
 
     lines.extend([
         "-" * 70,
-        "DISK C:"
+        "ДИСК C:"
     ])
 
     if disk is not None:
         lines.extend([
-            f"Usage:      {disk.percent:6.1f}%",
-            f"Used:       {format_size(disk.used):>12}",
-            f"Free:       {format_size(disk.free):>12}",
-            f"Read:       {format_speed(disk_read):>12}",
-            f"Write:      {format_speed(disk_write):>12}"
+            f"Заполнено:  {disk.percent:6.1f}%",
+            f"Занято:     {format_size(disk.used):>12}",
+            f"Свободно:   {format_size(disk.free):>12}",
+            f"Чтение:     {format_speed(disk_read):>12}",
+            f"Запись:     {format_speed(disk_write):>12}"
         ])
     else:
         lines.extend([
-            "Usage:         N/A",
-            "Used:          N/A",
-            "Free:          N/A",
-            "Read:          N/A",
-            "Write:         N/A"
+            "Заполнено:     N/A",
+            "Занято:        N/A",
+            "Свободно:      N/A",
+            "Чтение:        N/A",
+            "Запись:        N/A"
         ])
 
     lines.extend([
@@ -463,11 +443,11 @@ def show_status():
 
             if gpu["load"] is not None:
                 lines.append(
-                    f"Load:       {gpu['load']:6.1f}%"
+                    f"Загрузка:   {gpu['load']:6.1f}%"
                 )
             else:
                 lines.append(
-                    "Load:          N/A"
+                    "Загрузка:      N/A"
                 )
 
             if (
@@ -484,27 +464,27 @@ def show_status():
 
             if gpu["temperature"] is not None:
                 lines.append(
-                    f"Temp:       "
-                    f"{gpu['temperature']:6.1f} C"
+                    f"Температура:{gpu['temperature']:6.1f} C"
                 )
             else:
                 lines.append(
-                    "Temp:           N/A"
+                    "Температура:   N/A"
                 )
 
             lines.append("")
 
     else:
         lines.append(
-            "No GPU information available."
+            "Информация о GPU недоступна."
         )
 
     lines.extend([
         "-" * 70,
-        "NETWORK:",
+        "СЕТЬ:",
         f"Download:   {format_speed(download):>12}",
         f"Upload:     {format_speed(upload):>12}",
-        "-" * 70
+        "-" * 70,
+        "ДИАГНОСТИКА:"
     ])
 
     ram_percent = (
@@ -530,7 +510,7 @@ def show_status():
 
     lines.extend([
         "=" * 70,
-        "Updating every second... Press CTRL+C to stop."
+        "Обновление каждую секунду. CTRL+C — остановить."
     ])
 
     print(
@@ -564,6 +544,6 @@ if __name__ == "__main__":
         print("\n")
         print("=" * 70)
         print(
-            "AMS31 MONITORING SYSTEM STOPPED."
+            "AMS31 MONITORING SYSTEM ОСТАНОВЛЕН."
         )
         print("=" * 70)
