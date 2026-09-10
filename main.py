@@ -17,7 +17,9 @@ UPDATE_INTERVAL = 1
 
 previous_net = psutil.net_io_counters()
 previous_disk = psutil.disk_io_counters()
-previous_time = time.time()
+previous_time = time.perf_counter()
+
+cached_gpus = []
 
 
 def format_speed(value):
@@ -50,7 +52,7 @@ def run_powershell(script):
             encoding="utf-8",
             errors="replace",
             creationflags=subprocess.CREATE_NO_WINDOW,
-            timeout=5
+            timeout=3
         )
 
         if result.returncode != 0:
@@ -75,7 +77,7 @@ def get_speeds():
     try:
         current_net = psutil.net_io_counters()
         current_disk = psutil.disk_io_counters()
-        current_time = time.time()
+        current_time = time.perf_counter()
 
         elapsed = current_time - previous_time
 
@@ -268,8 +270,26 @@ def get_gpu_load_groups():
     return result
 
 
+def initialize_gpu_list():
+    global cached_gpus
+
+    try:
+        cached_gpus = get_windows_gpu_list()
+    except Exception:
+        cached_gpus = []
+
+
 def get_gpu_info():
-    gpus = get_windows_gpu_list()
+    gpus = []
+
+    for gpu in cached_gpus:
+        gpus.append({
+            "name": gpu["name"],
+            "vram": gpu["vram"],
+            "load": None,
+            "temperature": gpu["temperature"],
+            "device_id": gpu["device_id"]
+        })
 
     if not gpus:
         return []
@@ -352,8 +372,9 @@ def get_health(cpu, ram, disk, gpus):
 def safe_cpu_percent():
     try:
         return psutil.cpu_percent(
-            interval=0.1
+            interval=None
         )
+
     except Exception:
         return 0.0
 
@@ -361,6 +382,7 @@ def safe_cpu_percent():
 def safe_ram():
     try:
         return psutil.virtual_memory()
+
     except Exception:
         return None
 
@@ -368,6 +390,7 @@ def safe_ram():
 def safe_disk():
     try:
         return psutil.disk_usage("C:/")
+
     except Exception:
         return None
 
@@ -421,6 +444,7 @@ def show_status():
             f"Чтение:     {format_speed(disk_read):>12}",
             f"Запись:     {format_speed(disk_write):>12}"
         ])
+
     else:
         lines.extend([
             "Заполнено:     N/A",
@@ -525,20 +549,41 @@ def show_status():
 
     print(
         "\033[J",
-        end=""
+        end="",
+        flush=True
     )
 
 
 if __name__ == "__main__":
     os.system("cls")
 
+    # Первый вызов CPU нужен для инициализации psutil.
+    psutil.cpu_percent(interval=None)
+
+    # Название GPU и объём VRAM определяем один раз.
+    # Эти данные не меняются каждую секунду.
+    initialize_gpu_list()
+
+    next_update = time.perf_counter()
+
     try:
         while True:
             show_status()
 
-            time.sleep(
-                UPDATE_INTERVAL
+            next_update += UPDATE_INTERVAL
+
+            delay = (
+                next_update
+                - time.perf_counter()
             )
+
+            if delay > 0:
+                time.sleep(delay)
+
+            else:
+                # Если какой-либо запрос занял больше секунды,
+                # не накапливаем задержку.
+                next_update = time.perf_counter()
 
     except KeyboardInterrupt:
         print("\n")
